@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1d4ed8" />
+    <title>Politician Stock Tracker</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-content">
+        <h1>USA Politician Stock Activity</h1>
+        <p class="subtitle">
+          Explore stock transactions reported by members of the U.S. Senate and
+          House of Representatives based on their legally required disclosures.
+          Search by name, focus on buys or sells, and narrow the activity window
+          to quickly spot fresh trades.
+        </p>
+      </div>
+      <div class="controls">
+        <label class="search-group">
+          <span class="label">Search politician</span>
+          <input
+            id="searchInput"
+            type="search"
+            placeholder="e.g. Nancy Pelosi"
+            autocomplete="off"
+          />
+        </label>
+        <label class="filter-group">
+          <span class="label">Transaction type</span>
+          <select id="typeFilter">
+            <option value="all">All</option>
+            <option value="purchase">Buy only</option>
+            <option value="sale">Sell only</option>
+          </select>
+        </label>
+        <label class="filter-group">
+          <span class="label">Chamber</span>
+          <select id="chamberFilter">
+            <option value="all">Both chambers</option>
+            <option value="senate">Senate</option>
+            <option value="house">House</option>
+          </select>
+        </label>
+        <label class="filter-group">
+          <span class="label">Activity window</span>
+          <select id="windowFilter">
+            <option value="30">Last 30 days</option>
+            <option value="90" selected>Last 90 days</option>
+            <option value="365">Last 12 months</option>
+            <option value="all">All available</option>
+          </select>
+        </label>
+      </div>
+      <div class="utilities">
+        <button id="installButton" class="utility-button" type="button" hidden>
+          Install app
+        </button>
+        <button
+          id="notificationButton"
+          class="utility-button utility-button--ghost"
+          type="button"
+          hidden
+        >
+          <span data-enable-text>Enable alerts</span>
+          <span data-disable-text hidden>Disable alerts</span>
+        </button>
+        <p id="notificationStatus" class="utility-note" role="status" aria-live="polite"></p>
+      </div>
+    </header>
+
+    <main>
+      <section id="summary" class="summary" hidden>
+        <div>
+          <p class="summary__headline">
+            <span data-count>0</span> transactions <span data-window>reported recently</span>
+          </p>
+          <p class="summary__sources">
+            Sources: <span data-sources></span>
+          </p>
+          <p class="summary__note" data-note hidden></p>
+        </div>
+        <div class="summary__updated">
+          Updated <span data-updated>—</span>
+        </div>
+      </section>
+
+      <section id="status" class="status status--loading">
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="status-text">Loading transactions...</span>
+      </section>
+
+      <section class="table-container" hidden>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Politician</th>
+              <th scope="col">Chamber</th>
+              <th scope="col">Transaction</th>
+              <th scope="col">Asset</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Traded</th>
+              <th scope="col">Filed</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td class="politician">
+          <div class="politician-name"></div>
+          <div class="politician-meta"></div>
+        </td>
+        <td class="chamber"></td>
+        <td class="transaction"></td>
+        <td class="asset">
+          <div class="ticker"></div>
+          <div class="asset-name"></div>
+        </td>
+        <td class="amount"></td>
+        <td class="trade-date"></td>
+        <td class="filed">
+          <span class="filed-date"></span>
+          <a class="filed-link" target="_blank" rel="noreferrer noopener">Report</a>
+        </td>
+      </tr>
+    </template>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
