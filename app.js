@@ -1,3 +1,4 @@
+
 const DEFAULT_CONFIG = {
   useProxy: false,
   proxyEndpoint: '',
@@ -52,6 +53,7 @@ if (PROXY_AVAILABLE) {
   console.info(`Proxy mode enabled. Requests will be routed through ${PROXY_ENDPOINT}.`);
 }
 
+
 const MS_PER_DAY = 86_400_000;
 const MAX_RENDERED_ROWS = 500;
 const WINDOW_LABELS = {
@@ -61,9 +63,11 @@ const WINDOW_LABELS = {
   all: 'across all available disclosures',
 };
 
+
 const ICON_192_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAB6klEQVR4nO3SQQkAIADAQItYyfzGsYN7iHBwAfbYmGvDtfG8gK8ZiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEcgB7JrqcciodXwAAAABJRU5ErkJggg=='
 ;
+
 
 const statusEl = document.getElementById('status');
 const tableContainer = document.querySelector('.table-container');
