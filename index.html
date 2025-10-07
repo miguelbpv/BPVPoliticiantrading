@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1d4ed8" />
     <title>Politician Stock Tracker</title>
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -58,6 +60,21 @@
             <option value="all">All available</option>
           </select>
         </label>
+      </div>
+      <div class="utilities">
+        <button id="installButton" class="utility-button" type="button" hidden>
+          Install app
+        </button>
+        <button
+          id="notificationButton"
+          class="utility-button utility-button--ghost"
+          type="button"
+          hidden
+        >
+          <span data-enable-text>Enable alerts</span>
+          <span data-disable-text hidden>Disable alerts</span>
+        </button>
+        <p id="notificationStatus" class="utility-note" role="status" aria-live="polite"></p>
       </div>
     </header>
 
@@ -121,6 +138,7 @@
       </tr>
     </template>
 
+    <script src="app-config.js"></script>
     <script src="app.js" type="module"></script>
   </body>
 </html>

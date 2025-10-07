@@ -1,0 +1,54 @@
+{
+  "senate": [
+    {
+      "first_name": "Mark",
+      "last_name": "Kelly",
+      "type": "Purchase",
+      "ticker": "QQQ",
+      "asset_name": "Invesco QQQ Trust Series 1",
+      "amount": "$1,001 - $15,000",
+      "transaction_date": "2024-03-08",
+      "filing_date": "2024-03-12",
+      "ptr_link": "https://efdsearch.senate.gov/search/view/ptr/63ff7c5f-e2c3-4d19-8c76-6bc5d6b73d2f/"
+    },
+    {
+      "first_name": "Susan",
+      "last_name": "Collins",
+      "type": "Sale",
+      "ticker": "JNJ",
+      "asset_name": "Johnson & Johnson",
+      "amount": "$15,001 - $50,000",
+      "transaction_date": "2024-02-20",
+      "filing_date": "2024-03-05",
+      "ptr_link": "https://efdsearch.senate.gov/search/view/ptr/b7d18f2f-1dd2-4d26-9a5f-4ae0c5e3a1a9/",
+      "state": "ME",
+      "party": "Republican"
+    }
+  ],
+  "house": [
+    {
+      "representative": "Nancy Pelosi",
+      "party": "Democrat",
+      "owner": "Spouse",
+      "transaction": "Purchase",
+      "ticker": "AAPL",
+      "asset_description": "Apple Inc.",
+      "amount": "$500,001 - $1,000,000",
+      "transaction_date": "2024-01-24",
+      "disclosure_date": "2024-02-02",
+      "ptr_link": "https://disclosures-clerk.house.gov/public_disc/ptr-pdfs/2024/20026376.pdf"
+    },
+    {
+      "representative": "Ro Khanna",
+      "party": "Democrat",
+      "owner": "Spouse",
+      "transaction": "Sale",
+      "ticker": "TSLA",
+      "asset_description": "Tesla, Inc.",
+      "amount": "$100,001 - $250,000",
+      "transaction_date": "2024-02-10",
+      "disclosure_date": "2024-02-20",
+      "ptr_link": "https://disclosures-clerk.house.gov/public_disc/ptr-pdfs/2024/20027123.pdf"
+    }
+  ]
+}

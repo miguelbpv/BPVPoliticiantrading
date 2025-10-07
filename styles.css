@@ -55,6 +55,56 @@ header {
   gap: 1rem;
 }
 
+.utilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.utility-button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.65rem 1.4rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #f8fafc;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.utility-button:hover,
+.utility-button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+  outline: none;
+}
+
+.utility-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.utility-button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.utility-button--ghost {
+  background: rgba(37, 99, 235, 0.12);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.6);
+}
+
+.utility-note {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
 .search-group {
   flex: 2 1 260px;
   display: flex;
@@ -158,6 +208,11 @@ main {
 .status--error {
   background: rgba(190, 18, 60, 0.18);
   border-color: rgba(248, 113, 113, 0.6);
+}
+
+.status--warning {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(147, 197, 253, 0.5);
 }
 
 .status--hidden {
@@ -342,5 +397,16 @@ tbody tr:hover {
   .summary {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .utilities {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .utility-button {
+    width: 100%;
+    text-align: center;
   }
 }

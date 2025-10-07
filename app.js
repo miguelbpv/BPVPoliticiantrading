@@ -1,3 +1,59 @@
+
+const DEFAULT_CONFIG = {
+  useProxy: false,
+  proxyEndpoint: '',
+};
+
+const RUNTIME_CONFIG = (() => {
+  const base = { ...DEFAULT_CONFIG };
+
+  try {
+    if (typeof window !== 'undefined' && window.APP_CONFIG && typeof window.APP_CONFIG === 'object') {
+      Object.assign(base, window.APP_CONFIG);
+    }
+  } catch (error) {
+    console.warn('Unable to read APP_CONFIG overrides', error);
+  }
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('proxy')) {
+      const value = params.get('proxy');
+      base.useProxy = value !== '0' && value !== 'false';
+    } else if (params.has('useProxy')) {
+      const value = params.get('useProxy');
+      base.useProxy = value !== '0' && value !== 'false';
+    }
+
+    if (params.has('proxyEndpoint')) {
+      const endpoint = params.get('proxyEndpoint');
+      if (typeof endpoint === 'string') {
+        base.proxyEndpoint = endpoint;
+      }
+    }
+  } catch (error) {
+    console.warn('Unable to parse proxy query parameters', error);
+  }
+
+  return base;
+})();
+
+const USE_PROXY = Boolean(RUNTIME_CONFIG.useProxy);
+const PROXY_ENDPOINT =
+  typeof RUNTIME_CONFIG.proxyEndpoint === 'string'
+    ? RUNTIME_CONFIG.proxyEndpoint.trim().replace(/\/+$/, '')
+    : '';
+const PROXY_AVAILABLE = USE_PROXY && PROXY_ENDPOINT.length > 0;
+
+if (USE_PROXY && !PROXY_AVAILABLE) {
+  console.warn('Proxy mode is enabled but no proxyEndpoint was configured. Requests will be sent directly.');
+}
+
+if (PROXY_AVAILABLE) {
+  console.info(`Proxy mode enabled. Requests will be routed through ${PROXY_ENDPOINT}.`);
+}
+
+
 const MS_PER_DAY = 86_400_000;
 const MAX_RENDERED_ROWS = 500;
 const WINDOW_LABELS = {
@@ -6,6 +62,12 @@ const WINDOW_LABELS = {
   '365': 'reported in the last 12 months',
   all: 'across all available disclosures',
 };
+
+
+const ICON_192_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAB6klEQVR4nO3SQQkAIADAQItYyfzGsYN7iHBwAfbYmGvDtfG8gK8ZiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEcgB7JrqcciodXwAAAABJRU5ErkJggg=='
+;
+
 
 const statusEl = document.getElementById('status');
 const tableContainer = document.querySelector('.table-container');
@@ -21,11 +83,29 @@ const searchInput = document.getElementById('searchInput');
 const typeFilter = document.getElementById('typeFilter');
 const chamberFilter = document.getElementById('chamberFilter');
 const windowFilter = document.getElementById('windowFilter');
+const installButton = document.getElementById('installButton');
+const notificationButton = document.getElementById('notificationButton');
+const notificationStatusEl = document.getElementById('notificationStatus');
+
+const NOTIFICATION_PREF_KEY = 'politician-tracker-notifications';
+const AUTO_REFRESH_MS = 15 * 60 * 1000;
 
 let transactions = [];
 let filteredTransactions = [];
 let loadedSources = [];
 let latestDisclosureMs = 0;
+let deferredInstallPrompt = null;
+let notificationsEnabled = false;
+let latestAlertNote = '';
+let latestAlertTimeoutId = null;
+let autoRefreshTimer = null;
+let isInitialLoad = true;
+let isLoadingTransactions = false;
+let offlineMessageVisible = false;
+
+const fallbackSources = new Set();
+const proxiedSources = new Set();
+let sampleDataPromise = null;
 
 const currentYear = new Date().getFullYear();
 const senateYears = [currentYear, currentYear - 1];
@@ -181,6 +261,127 @@ const debounce = (fn, wait = 200) => {
   };
 };
 
+function buildProxyUrl(url, proxyEndpoint = PROXY_ENDPOINT) {
+  if (!proxyEndpoint) {
+    return url;
+  }
+
+  const trimmedEndpoint = proxyEndpoint.replace(/\/+$/, '');
+  const separator = trimmedEndpoint.includes('?') ? '&' : '?';
+  return `${trimmedEndpoint}${separator}url=${encodeURIComponent(url)}`;
+}
+
+async function loadSampleData(sourceId) {
+  if (!sourceId) {
+    throw new Error('Sample data request missing source identifier.');
+  }
+
+  if (!sampleDataPromise) {
+    sampleDataPromise = fetch('./sample-data.json', { cache: 'no-store', mode: 'cors' })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch sample data (${response.status})`);
+        }
+        return response.json();
+      })
+      .catch((error) => {
+        sampleDataPromise = null;
+        throw error;
+      });
+  }
+
+  const data = await sampleDataPromise;
+  const subset = data?.[sourceId];
+  if (!Array.isArray(subset)) {
+    throw new Error(`No sample data available for "${sourceId}".`);
+  }
+
+  return subset;
+}
+
+async function getJson(url, options = {}) {
+  const {
+    fallbackSourceId,
+    forceSample = false,
+    useProxy = USE_PROXY,
+    proxyEndpoint = PROXY_ENDPOINT,
+  } = options;
+
+  if (forceSample) {
+    const data = await loadSampleData(fallbackSourceId);
+    return {
+      data,
+      meta: {
+        viaProxy: false,
+        viaSample: true,
+        originalUrl: url,
+        attemptedUrl: 'sample-data.json',
+      },
+    };
+  }
+
+  if (!url) {
+    throw new Error('A URL is required to fetch JSON.');
+  }
+
+  const attempts = [];
+
+  if (useProxy && proxyEndpoint) {
+    attempts.push({
+      url: buildProxyUrl(url, proxyEndpoint),
+      viaProxy: true,
+    });
+  }
+
+  attempts.push({ url, viaProxy: false });
+
+  const errors = [];
+
+  for (const attempt of attempts) {
+    try {
+      const response = await fetch(attempt.url, { cache: 'no-store', mode: 'cors' });
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status} for ${attempt.url}`);
+      }
+
+      const data = await response.json();
+      return {
+        data,
+        meta: {
+          viaProxy: attempt.viaProxy,
+          viaSample: false,
+          originalUrl: url,
+          attemptedUrl: attempt.url,
+        },
+      };
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  if (fallbackSourceId) {
+    try {
+      const data = await loadSampleData(fallbackSourceId);
+      console.warn(`Falling back to bundled sample data for ${fallbackSourceId}.`);
+      return {
+        data,
+        meta: {
+          viaProxy: false,
+          viaSample: true,
+          originalUrl: url,
+          attemptedUrl: 'sample-data.json',
+        },
+      };
+    } catch (sampleError) {
+      errors.push(sampleError);
+    }
+  }
+
+  const error = new Error(`Unable to download JSON from ${url}`);
+  error.attempts = errors;
+  throw error;
+}
+
 function parseDate(rawValue) {
   if (!rawValue) return null;
 
@@ -304,9 +505,29 @@ function buildSearchText(parts = {}) {
     .join(' ');
 }
 
-function setStatus(message, { isError = false, hidden = false, loading = false } = {}) {
+function showAlertNote(message, timeoutMs = 20000) {
+  latestAlertNote = message;
+  updateSummary(filteredTransactions);
+
+  if (latestAlertTimeoutId) {
+    clearTimeout(latestAlertTimeoutId);
+  }
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    latestAlertTimeoutId = window.setTimeout(() => {
+      latestAlertNote = '';
+      updateSummary(filteredTransactions);
+    }, timeoutMs);
+  }
+}
+
+function setStatus(
+  message,
+  { isError = false, isWarning = false, hidden = false, loading = false } = {}
+) {
   statusEl.querySelector('.status-text').textContent = message;
   statusEl.classList.toggle('status--error', isError);
+  statusEl.classList.toggle('status--warning', isWarning);
   statusEl.classList.toggle('status--hidden', hidden);
   statusEl.classList.toggle('status--loading', loading);
 }
@@ -406,10 +627,35 @@ function updateSummary(data) {
     : 'No data sources available';
   summaryUpdatedEl.textContent = formatRelativeTime(latestDisclosureMs);
 
+  const notes = [];
+  if (latestAlertNote) {
+    notes.push(latestAlertNote);
+  }
+
   if (data.length > MAX_RENDERED_ROWS) {
+    notes.push(
+      `Showing first ${MAX_RENDERED_ROWS.toLocaleString('en-US')} of ${data
+        .length.toLocaleString('en-US')} matches.`
+    );
+  }
+
+  if (fallbackSources.size) {
+    const fallbackList = Array.from(fallbackSources);
+    const fallbackLabel = fallbackList.join(', ');
+    if (fallbackList.length === 1) {
+      notes.push(`Showing bundled sample data while ${fallbackLabel} feed is unavailable.`);
+    } else {
+      notes.push(`Showing bundled sample data while these feeds are unavailable: ${fallbackLabel}.`);
+    }
+  }
+
+  if (proxiedSources.size) {
+    notes.push('Live disclosures are currently being requested through the configured proxy endpoint.');
+  }
+
+  if (notes.length) {
     summaryNoteEl.hidden = false;
-    summaryNoteEl.textContent = `Showing first ${MAX_RENDERED_ROWS.toLocaleString('en-US')} of ${data
-      .length.toLocaleString('en-US')} matches.`;
+    summaryNoteEl.textContent = notes.join(' • ');
   } else {
     summaryNoteEl.hidden = true;
     summaryNoteEl.textContent = '';
@@ -454,9 +700,11 @@ function applyFilters() {
   return filteredTransactions;
 }
 
-function filterTransactions() {
+function filterTransactions({ preserveStatus = false } = {}) {
   if (!transactions.length) {
-    setStatus('Loading transactions...', { loading: true });
+    if (!preserveStatus) {
+      setStatus('Loading transactions...', { loading: true });
+    }
     summaryEl.hidden = true;
     tableContainer.hidden = true;
     return;
@@ -475,30 +723,73 @@ function filterTransactions() {
   const rowsToRender = results.slice(0, MAX_RENDERED_ROWS);
 
   tableContainer.hidden = false;
-  setStatus('', { hidden: true });
+  if (!preserveStatus) {
+    setStatus('', { hidden: true });
+  }
   renderRows(rowsToRender);
 }
 
 async function fetchSource(source) {
   const entries = [];
   const successfulUrls = [];
+  const errors = [];
+  let usedProxy = false;
+  let usedSample = false;
 
-  await Promise.all(
-    source.urls.map(async (url) => {
-      try {
-        const response = await fetch(url, {
-          cache: 'no-store',
-        });
+  for (let index = 0; index < source.urls.length; index += 1) {
+    const url = source.urls[index];
+    const isLastAttempt = index === source.urls.length - 1;
 
-        if (!response.ok) {
-          throw new Error(`Failed to download ${url} (${response.status})`);
+    try {
+      const { data, meta } = await getJson(url, {
+        fallbackSourceId: isLastAttempt ? source.id : undefined,
+      });
+
+      if (meta?.viaSample) {
+        usedSample = true;
+        fallbackSources.add(source.label);
+        if (Array.isArray(data)) {
+          data.forEach((item) => {
+            const normalized = source.normalize(item, source);
+            if (normalized) {
+              entries.push(normalized);
+            }
+          });
         }
+        successfulUrls.push('sample-data.json');
+        break;
+      }
 
-        const data = await response.json();
-        if (!Array.isArray(data)) {
-          return;
+      if (!Array.isArray(data)) {
+        continue;
+      }
+
+      if (meta?.viaProxy) {
+        usedProxy = true;
+      }
+
+      data.forEach((item) => {
+        const normalized = source.normalize(item, source);
+        if (normalized) {
+          entries.push(normalized);
         }
+      });
 
+      successfulUrls.push(meta?.viaProxy ? `${url} (via proxy)` : url);
+    } catch (error) {
+      errors.push(error);
+      console.warn(`[${source.id}]`, error);
+    }
+  }
+
+  if (!entries.length && !usedSample) {
+    try {
+      const { data } = await getJson('./sample-data.json', {
+        fallbackSourceId: source.id,
+        forceSample: true,
+      });
+
+      if (Array.isArray(data)) {
         data.forEach((item) => {
           const normalized = source.normalize(item, source);
           if (normalized) {
@@ -506,26 +797,51 @@ async function fetchSource(source) {
           }
         });
 
-        successfulUrls.push(url);
-      } catch (error) {
-        console.warn(`[${source.id}]`, error);
+        usedSample = true;
+        fallbackSources.add(source.label);
+        successfulUrls.push('sample-data.json');
       }
-    })
-  );
+    } catch (sampleError) {
+      errors.push(sampleError);
+      console.error(`[${source.id}] sample fallback failed`, sampleError);
+    }
+  }
+
+  if (usedProxy) {
+    proxiedSources.add(source.label);
+  }
 
   return {
     id: source.id,
     label: source.label,
     entries,
     successfulUrls,
+    errors,
+    usedProxy,
+    usedSample,
   };
 }
 
-async function loadTransactions() {
-  setStatus('Loading transactions from official disclosures...', { loading: true });
-  summaryEl.hidden = true;
-  tableContainer.hidden = true;
+async function loadTransactions({ silent = false } = {}) {
+  if (isLoadingTransactions) {
+    return;
+  }
+
+  isLoadingTransactions = true;
+
+  if (!silent) {
+    setStatus('Loading transactions from official disclosures...', { loading: true });
+    summaryEl.hidden = true;
+    tableContainer.hidden = true;
+  } else if (!transactions.length) {
+    setStatus('Loading transactions...', { loading: true });
+  }
+
   loadedSources = [];
+  fallbackSources.clear();
+  proxiedSources.clear();
+
+  const previousTransactions = transactions.slice();
 
   try {
     const results = await Promise.all(SOURCES.map((source) => fetchSource(source)));
@@ -534,7 +850,14 @@ async function loadTransactions() {
 
     results.forEach((result, index) => {
       if (result.entries.length > 0) {
-        loadedSources.push(SOURCES[index].label);
+        const labelBase = SOURCES[index].label;
+        if (result.usedSample) {
+          loadedSources.push(`${labelBase} (sample fallback)`);
+        } else if (result.usedProxy) {
+          loadedSources.push(`${labelBase} (via proxy)`);
+        } else {
+          loadedSources.push(labelBase);
+        }
       }
 
       result.entries.forEach((entry) => {
@@ -575,19 +898,316 @@ async function loadTransactions() {
 
     loadedSources = Array.from(new Set(loadedSources));
 
-    filterTransactions();
+    const previousIds = new Set(previousTransactions.map((entry) => entry.id));
+    const newEntries = previousTransactions.length
+      ? transactions.filter((entry) => !previousIds.has(entry.id))
+      : [];
+
+    const shouldPreserveStatus = silent || offlineMessageVisible;
+    offlineMessageVisible = false;
+    filterTransactions({ preserveStatus: shouldPreserveStatus });
+
+    if (previousTransactions.length && newEntries.length) {
+      handleNewTransactions(newEntries);
+    }
+
+    if (!autoRefreshTimer) {
+      autoRefreshTimer = window.setInterval(() => {
+        loadTransactions({ silent: true });
+      }, AUTO_REFRESH_MS);
+    }
+
+    if (isInitialLoad) {
+      isInitialLoad = false;
+    }
   } catch (error) {
     console.error(error);
-    setStatus(
-      'Unable to load the latest disclosures right now. Please refresh or try again later.',
-      { isError: true }
-    );
+    const hasExistingData = previousTransactions.length > 0;
+    if (hasExistingData) {
+      transactions = previousTransactions;
+      filterTransactions({ preserveStatus: true });
+    }
+
+    if (!navigator.onLine) {
+      offlineMessageVisible = true;
+      setStatus('You appear to be offline. Showing the most recently cached disclosures.', {
+        isWarning: true,
+      });
+    } else {
+      setStatus(
+        'Unable to load the latest disclosures right now. Please refresh or try again later.',
+        { isError: true }
+      );
+    }
+  } finally {
+    isLoadingTransactions = false;
   }
 }
 
-searchInput.addEventListener('input', debounce(filterTransactions, 150));
-typeFilter.addEventListener('change', filterTransactions);
-chamberFilter.addEventListener('change', filterTransactions);
-windowFilter.addEventListener('change', filterTransactions);
+function handleNewTransactions(newEntries) {
+  if (!Array.isArray(newEntries) || newEntries.length === 0) {
+    return;
+  }
 
+  const latest = newEntries[0];
+  const assetLabel = latest.ticker || latest.assetName || 'an asset';
+  const message =
+    newEntries.length === 1
+      ? `${latest.representative} reported a ${latest.transactionLabel.toLowerCase()} involving ${assetLabel}.`
+      : `${newEntries.length} new disclosures since your last refresh. Latest: ${latest.representative} ${latest.transactionLabel.toLowerCase()} ${assetLabel}.`;
+
+  showAlertNote(message, 20000);
+  sendNotificationForTransactions(newEntries);
+}
+
+async function sendNotificationForTransactions(newEntries) {
+  if (!notificationsEnabled) {
+    return;
+  }
+
+  if (!('Notification' in window) || Notification.permission !== 'granted') {
+    return;
+  }
+
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+
+  if (document.visibilityState === 'visible') {
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) {
+      return;
+    }
+
+    const latest = newEntries[0];
+    const assetLabel = latest.ticker || latest.assetName || 'an asset';
+    const title =
+      newEntries.length === 1
+        ? `${latest.representative} reported a ${latest.transactionLabel.toLowerCase()}`
+        : `${newEntries.length} new politician trades reported`;
+
+    const body =
+      newEntries.length === 1
+        ? `${assetLabel} • ${latest.tradeDateDisplay || 'Filed recently'}`
+        : `Latest: ${latest.representative} ${latest.transactionLabel.toLowerCase()} ${assetLabel}`;
+
+    await registration.showNotification(title, {
+      body,
+      icon: ICON_192_DATA_URL,
+      badge: ICON_192_DATA_URL,
+      tag: 'politician-tracker-update',
+      data: { url: './' },
+    });
+  } catch (error) {
+    console.error('Failed to deliver notification', error);
+  }
+}
+
+function loadNotificationPreference() {
+  try {
+    notificationsEnabled = localStorage.getItem(NOTIFICATION_PREF_KEY) === 'enabled';
+  } catch (error) {
+    notificationsEnabled = false;
+  }
+}
+
+function storeNotificationPreference(enabled) {
+  notificationsEnabled = enabled;
+  try {
+    localStorage.setItem(NOTIFICATION_PREF_KEY, enabled ? 'enabled' : 'disabled');
+  } catch (error) {
+    console.warn('Unable to persist notification preference', error);
+  }
+}
+
+function updateNotificationControls() {
+  if (!notificationButton || !notificationStatusEl) {
+    return;
+  }
+
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    notificationButton.hidden = true;
+    notificationStatusEl.textContent =
+      'Notifications require a modern browser with service worker support. Install the app in Chrome, Edge, or Firefox to enable alerts.';
+    storeNotificationPreference(false);
+    return;
+  }
+
+  const enableText = notificationButton.querySelector('[data-enable-text]');
+  const disableText = notificationButton.querySelector('[data-disable-text]');
+  const permission = Notification.permission;
+
+  if (permission === 'denied') {
+    notificationButton.hidden = true;
+    notificationStatusEl.textContent =
+      'Notifications are blocked in your browser settings. Update the permission to enable alerts.';
+    storeNotificationPreference(false);
+    return;
+  }
+
+  notificationsEnabled = notificationsEnabled && permission === 'granted';
+
+  notificationButton.hidden = false;
+  notificationButton.disabled = false;
+
+  if (enableText && disableText) {
+    enableText.hidden = notificationsEnabled;
+    disableText.hidden = !notificationsEnabled;
+  }
+
+  if (notificationsEnabled) {
+    notificationStatusEl.textContent =
+      'Alerts enabled. Keep the app open or installed to get notified about new disclosures.';
+  } else {
+    notificationStatusEl.textContent =
+      'Enable alerts to be notified about new disclosures while the app remains open.';
+  }
+}
+
+function setupNotificationControls() {
+  if (!notificationButton || !notificationStatusEl) {
+    return;
+  }
+
+  loadNotificationPreference();
+  updateNotificationControls();
+
+  notificationButton.addEventListener('click', async () => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      return;
+    }
+
+    if (!notificationsEnabled) {
+      notificationButton.disabled = true;
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          storeNotificationPreference(true);
+          updateNotificationControls();
+          showAlertNote('Alerts enabled. We will notify you about new filings while the app is open.', 15000);
+        } else {
+          storeNotificationPreference(false);
+          updateNotificationControls();
+          notificationStatusEl.textContent =
+            'Notifications stayed off. You can try again with the Enable alerts button.';
+        }
+      } finally {
+        notificationButton.disabled = false;
+      }
+    } else {
+      storeNotificationPreference(false);
+      updateNotificationControls();
+      notificationStatusEl.textContent = 'Alerts paused. Re-enable them whenever you need updates.';
+    }
+  });
+}
+
+function setupInstallPrompt() {
+  if (!installButton) {
+    return;
+  }
+
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    installButton.hidden = true;
+  }
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    installButton.hidden = false;
+  });
+
+  installButton.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) {
+      installButton.hidden = true;
+      return;
+    }
+
+    installButton.disabled = true;
+    try {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      installButton.hidden = true;
+    } catch (error) {
+      console.error('Install prompt failed', error);
+    } finally {
+      installButton.disabled = false;
+      deferredInstallPrompt = null;
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installButton.hidden = true;
+    deferredInstallPrompt = null;
+    showAlertNote('App installed. Find it on your home screen for one-tap access.', 15000);
+  });
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('service-worker.js')
+      .then(() => {
+        updateNotificationControls();
+      })
+      .catch((error) => {
+        console.error('Service worker registration failed', error);
+      });
+  });
+}
+
+function updateConnectionStatus() {
+  if (!navigator.onLine) {
+    offlineMessageVisible = true;
+    setStatus('You appear to be offline. Showing the most recently cached disclosures.', {
+      isWarning: true,
+    });
+    return;
+  }
+
+  if (offlineMessageVisible) {
+    offlineMessageVisible = false;
+    if (!isLoadingTransactions && transactions.length) {
+      setStatus('', { hidden: true });
+    } else if (!isLoadingTransactions) {
+      setStatus('Loading transactions...', { loading: true });
+    }
+  }
+}
+
+function monitorConnection() {
+  window.addEventListener('online', () => {
+    updateConnectionStatus();
+    loadTransactions({ silent: true });
+  });
+  window.addEventListener('offline', updateConnectionStatus);
+  updateConnectionStatus();
+}
+
+searchInput.addEventListener(
+  'input',
+  debounce(() => filterTransactions({ preserveStatus: offlineMessageVisible }), 150)
+);
+typeFilter.addEventListener('change', () =>
+  filterTransactions({ preserveStatus: offlineMessageVisible })
+);
+chamberFilter.addEventListener('change', () =>
+  filterTransactions({ preserveStatus: offlineMessageVisible })
+);
+windowFilter.addEventListener('change', () =>
+  filterTransactions({ preserveStatus: offlineMessageVisible })
+);
+
+registerServiceWorker();
+setupInstallPrompt();
+setupNotificationControls();
+monitorConnection();
 loadTransactions();
